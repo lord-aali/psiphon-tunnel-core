@@ -2,8 +2,6 @@
 
 > اگر این پروژه برای شما مفید بود، لطفاً در گیت‌هاب به آن یک ⭐ بدهید!
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Z8Z43E5D)
-
 یک نسخه سفارشی از هسته تونل سایفون که با لیستی انتخاب شده از سرورها برای بهینه‌سازی عملکرد و اتصال، از پیش پیکربندی شده است.
 
 [<img src="https://raw.githubusercontent.com/Faran-17/custom-psiphon-core/main/assets/En-Button.svg" alt="English" width="120">](./README.md)

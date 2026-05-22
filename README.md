@@ -2,11 +2,9 @@
 
 > If you find this project useful, please consider giving it a ⭐ on GitHub!
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Z8Z43E5D)
-
 A custom build of the Psiphon Tunnel Core, pre-configured with a curated list of servers for optimized performance and connectivity.
 
-[<img src="https://raw.githubusercontent.com/Faran-17/custom-psiphon-core/main/assets/Fa-Button.svg" alt="Persian" width="120">](./README.fa.md)
+[<img src="https://raw.githubusercontent.com/Faran-17/custom-psiphon-core/main/assets/Fa-Button.svg" alt="فارسی" width="120">](./README.fa.md)
 
 ## What is this?
 
