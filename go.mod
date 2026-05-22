@@ -1,160 +1,87 @@
-module github.com/Psiphon-Labs/psiphon-tunnel-core
+module github.com/bepass-org/psiphon
 
-go 1.26.0
+go 1.25.5
 
-toolchain go1.26.3
+replace github.com/Psiphon-Labs/psiphon-tunnel-core => ./local_replacements/psiphon-tunnel-core
 
-// The following replaces are required only when the build tag
-// PSIPHON_ENABLE_REFRACTION_NETWORKING is specified.
+replace github.com/Psiphon-Labs/quic-go => ./local_replacements/quic-go
 
-replace gitlab.com/yawning/obfs4.git => github.com/jmwample/obfs4 v0.0.0-20230725223418-2d2e5b4a16ba
-
-replace github.com/pion/dtls/v2 => ./replace/dtls
-
-// pion/dtls v2 uses a local replace (replace/dtls) with [Psiphon] patches
-// for Conjure/refraction-networking support.
+replace github.com/Psiphon-Labs/psiphon-tls => ./local_replacements/psiphon-tls
 
 require (
-	filippo.io/edwards25519 v1.2.0
-	github.com/Jigsaw-Code/outline-sdk v0.0.16
-	github.com/Jigsaw-Code/outline-ss-server v1.8.0
-	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
-	github.com/Psiphon-Inc/uds-ipc v1.0.1
-	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
-	github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
-	github.com/Psiphon-Labs/covert-dtls v0.0.0-20260423180104-2d3b15cbc8be
-	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
-	github.com/Psiphon-Labs/pion-ice/v4 v4.0.0-20260423180031-37d6e92d021f
-	github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20260423180049-7ff453f9681a
-	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260429174135-190516348878
-	github.com/Psiphon-Labs/quic-go v0.0.0-20250527153145-79fe45fb83b1
-	github.com/Psiphon-Labs/utls v1.1.1-0.20260423193914-69eb96d02588
-	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
-	github.com/axiomhq/hyperloglog v0.2.6
-	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
-	github.com/bits-and-blooms/bloom/v3 v3.6.0
-	github.com/cespare/xxhash v1.1.0
-	github.com/cheekybits/genny v0.0.0-20170328200008-9127e812e1e9
-	github.com/cognusion/go-cache-lru v0.0.0-20170419142635-f73e2280ecea
-	github.com/deckarep/golang-set v0.0.0-20171013212420-1d4478f51bed
-	github.com/dgraph-io/badger v1.5.4-0.20180815194500-3a87f6d9c273
-	github.com/elazarl/goproxy v0.0.0-20200809112317-0581fc3aee2d
-	github.com/elazarl/goproxy/ext v0.0.0-20200809112317-0581fc3aee2d
-	github.com/florianl/go-nfqueue v1.1.1-0.20200829120558-a2f196e98ab0
-	github.com/flynn/noise v1.0.1-0.20220214164934-d803f5c4b0f4
-	github.com/fxamacker/cbor/v2 v2.5.0
-	github.com/go-ole/go-ole v1.3.0
-	github.com/gobwas/glob v0.2.4-0.20180402141543-f00a7392b439
-	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da
-	github.com/google/gopacket v1.1.19
-	github.com/grafov/m3u8 v0.0.0-20171211212457-6ab8f28ed427
-	github.com/marusama/semaphore v0.0.0-20171214154724-565ffd8e868a
-	github.com/miekg/dns v1.1.56
-	github.com/minio/crc64nvme v1.1.1
-	github.com/mitchellh/panicwrap v0.0.0-20170106182340-fce601fe5557
-	github.com/oschwald/maxminddb-golang v1.12.0
-	github.com/patrickmn/go-cache v2.1.0+incompatible
-	github.com/pion/datachannel v1.6.0
-	github.com/pion/interceptor v0.1.44
-	github.com/pion/logging v0.2.4
-	github.com/pion/rtp v1.10.1
-	github.com/pion/sctp v1.9.2
-	github.com/pion/sdp/v3 v3.0.18
-	github.com/pion/stun/v3 v3.1.1
-	github.com/pion/transport/v4 v4.0.1
-	github.com/pires/go-proxyproto v0.11.0
-	github.com/refraction-networking/conjure v0.7.11-0.20240130155008-c8df96195ab2
-	github.com/refraction-networking/gotapdance v1.7.10
-	github.com/ryanuber/go-glob v0.0.0-20170128012129-256dc444b735
-	github.com/shirou/gopsutil/v4 v4.24.5
-	github.com/sirupsen/logrus v1.9.3
-	github.com/stretchr/testify v1.11.1
-	github.com/syndtr/gocapability v0.0.0-20170704070218-db04d3cc01c8
-	github.com/tailscale/netlink v1.1.1-0.20211101221916-cabfb018fe85
-	github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78
-	github.com/wlynxg/anet v0.0.5
-	github.com/zeebo/blake3 v0.2.4
-	golang.org/x/crypto v0.48.0
-	golang.org/x/net v0.50.0
-	golang.org/x/sync v0.19.0
-	golang.org/x/sys v0.42.0
-	golang.org/x/term v0.40.0
-	golang.org/x/time v0.10.0
-	golang.zx2c4.com/wireguard v0.0.0-20230325221338-052af4a8072b
-	golang.zx2c4.com/wireguard/windows v0.5.3
-	google.golang.org/protobuf v1.36.6
-	tailscale.com v1.58.2
+	github.com/MakeNowJust/heredoc/v2 v2.0.1
+	github.com/Psiphon-Labs/psiphon-tunnel-core v2.0.28+incompatible
+	github.com/bepass-org/ipscanner v0.0.0-20240222153143-97adabc6ad92
+	github.com/bepass-org/proxy v0.0.0-20240201095508-c86216dd0aea
+	github.com/refraction-networking/conjure v0.9.1
+	github.com/refraction-networking/utls v1.8.2
+	golang.org/x/crypto v0.51.0
+	golang.org/x/net v0.54.0
+	golang.org/x/sys v0.44.0
+	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2
+	gopkg.in/ini.v1 v1.67.2
+	gvisor.dev/gvisor v0.0.0-20260517053402-77dbc433352e
 )
 
 require (
-	filippo.io/bigmod v0.0.1 // indirect
-	filippo.io/keygen v0.0.0-20230306160926-5201437acf8e // indirect
-	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
-	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
+	filippo.io/bigmod v0.0.3 // indirect
+	filippo.io/keygen v0.0.0-20240718133620-7f162efbbd87 // indirect
+	github.com/AndreasBriese/bbloom v0.0.0-20170702084017-28f7e881ca57 // indirect
+	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7 // indirect
+	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464 // indirect
+	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20250318183125-2a2fae2db378 // indirect
+	github.com/Psiphon-Labs/quic-go v0.0.0-20230626192210-73f29effc9da // indirect
+	github.com/Psiphon-Labs/tls-tris v0.0.0-20230824155421-58bf6d336a9a // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
-	github.com/bits-and-blooms/bitset v1.10.0 // indirect
-	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/coreos/go-iptables v0.7.0 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/dblohm7/wingoes v0.0.0-20230929194252-e994401fc077 // indirect
+	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f // indirect
+	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61 // indirect
+	github.com/cheekybits/genny v0.0.0-20170328200008-9127e812e1e9 // indirect
+	github.com/cognusion/go-cache-lru v0.0.0-20170419142635-f73e2280ecea // indirect
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dchest/siphash v1.2.3 // indirect
-	github.com/dgryski/go-farm v0.0.0-20240924180020-3414d57e47da // indirect
-	github.com/dgryski/go-metro v0.0.0-20250106013310-edb8663e5e33 // indirect
-	github.com/gaukas/godicttls v0.0.4 // indirect
-	github.com/go-logr/logr v1.4.3 // indirect
+	github.com/dgraph-io/badger v1.5.4-0.20180815194500-3a87f6d9c273 // indirect
+	github.com/dgryski/go-farm v0.0.0-20180109070241-2de33835d102 // indirect
+	github.com/flynn/noise v1.1.0 // indirect
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
-	github.com/golang/protobuf v1.5.3 // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/nftables v0.1.1-0.20230115205135-9aa6fdf5a28c // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
+	github.com/google/btree v1.1.2 // indirect
 	github.com/google/pprof v0.0.0-20211214055906-6f57359322fd // indirect
-	github.com/google/uuid v1.6.0 // indirect
-	github.com/josharian/native v1.1.1-0.20230202152459-5c7d0dd6ab86 // indirect
-	github.com/jsimonetti/rtnetlink v1.3.5 // indirect
-	github.com/kamstrup/intmap v0.5.2 // indirect
-	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0 // indirect
-	github.com/klauspost/compress v1.18.0 // indirect
-	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
+	github.com/grafov/m3u8 v0.0.0-20171211212457-6ab8f28ed427 // indirect
+	github.com/hashicorp/golang-lru v1.0.2 // indirect
+	github.com/juju/ratelimit v1.0.2 // indirect
+	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/libp2p/go-reuseport v0.4.0 // indirect
-	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
-	github.com/mdlayher/netlink v1.7.2 // indirect
-	github.com/mdlayher/socket v0.5.0 // indirect
+	github.com/miekg/dns v1.1.62 // indirect
 	github.com/mroth/weightedrand v1.0.0 // indirect
-	github.com/onsi/ginkgo/v2 v2.12.0 // indirect
+	github.com/onsi/ginkgo/v2 v2.9.5 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
-	github.com/pion/dtls/v2 v2.2.7 // indirect
-	github.com/pion/dtls/v3 v3.1.2 // indirect
-	github.com/pion/mdns/v2 v2.1.0 // indirect
+	github.com/pion/dtls/v2 v2.2.12 // indirect
+	github.com/pion/logging v0.2.2 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
-	github.com/pion/rtcp v1.2.16 // indirect
-	github.com/pion/srtp/v3 v3.0.10 // indirect
+	github.com/pion/sctp v1.8.35 // indirect
 	github.com/pion/stun v0.6.1 // indirect
-	github.com/pion/transport/v2 v2.2.3 // indirect
-	github.com/pion/turn/v4 v4.1.4 // indirect
+	github.com/pion/transport/v2 v2.2.10 // indirect
+	github.com/pion/transport/v3 v3.0.7 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/quic-go/qpack v0.4.0 // indirect
+	github.com/quic-go/qtls-go1-20 v0.4.1 // indirect
+	github.com/quic-go/quic-go v0.40.1 // indirect
 	github.com/refraction-networking/ed25519 v0.1.2 // indirect
+	github.com/refraction-networking/gotapdance v1.7.10 // indirect
 	github.com/refraction-networking/obfs4 v0.1.2 // indirect
-	github.com/refraction-networking/utls v1.3.3 // indirect
-	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	github.com/sergeyfrolov/bsbuffer v0.0.0-20180903213811-94e85abb8507 // indirect
-	github.com/shadowsocks/go-shadowsocks2 v0.1.5 // indirect
-	github.com/shoenig/go-m1cpu v0.1.6 // indirect
-	github.com/tailscale/goupnp v1.0.1-0.20210804011211-c64d0f06ea05 // indirect
-	github.com/tklauser/go-sysconf v0.3.12 // indirect
-	github.com/tklauser/numcpus v0.6.1 // indirect
-	github.com/vishvananda/netlink v1.2.1-beta.2 // indirect
-	github.com/vishvananda/netns v0.0.4 // indirect
-	github.com/x448/float16 v0.8.4 // indirect
-	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/goptlib v1.5.0 // indirect
-	go.uber.org/mock v0.4.0 // indirect
-	go4.org/mem v0.0.0-20220726221520-4f986261bf13 // indirect
-	go4.org/netipx v0.0.0-20230824141953-6213f710f925 // indirect
-	golang.org/x/exp v0.0.0-20240110193028-0dcbfd608b1e // indirect
-	golang.org/x/mod v0.32.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
-	golang.org/x/tools v0.41.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
+	github.com/sirupsen/logrus v1.9.3 // indirect
+	github.com/syndtr/gocapability v0.0.0-20170704070218-db04d3cc01c8 // indirect
+	github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78 // indirect
+	github.com/wlynxg/anet v0.0.3 // indirect
+	gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/goptlib v1.6.0 // indirect
+	gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/snowflake/v2 v2.10.1 // indirect
+	go.uber.org/mock v0.3.0 // indirect
+	golang.org/x/exp v0.0.0-20250711185948-6ae5c78190dc // indirect
+	golang.org/x/mod v0.35.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
+	golang.org/x/tools v0.44.0 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 )
