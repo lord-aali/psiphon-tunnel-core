@@ -1,6 +1,0 @@
-platform :ios, '17.0'
-
-target 'TunneledWebView' do
-    pod 'PsiphonTunnel', :git => 'https://github.com/Psiphon-Labs/psiphon-tunnel-core-iOS-library.git'
-end
-

@@ -4,7 +4,7 @@
 
 A custom build of the Psiphon Tunnel Core, pre-configured with a curated list of servers for optimized performance and connectivity.
 
-[<img src="https://raw.githubusercontent.com/Faran-17/custom-psiphon-core/main/assets/Fa-Button.svg" alt="فارسی" width="120">](./README.fa.md)
+[نسخه فارسی](./README.fa.md)
 
 ## What is this?
 
@@ -18,25 +18,12 @@ This project provides a modified version of the open-source [Psiphon Tunnel Core
 
 ## Supported Countries
 
-This build is configured to work with servers in the following countries:
+Run the executable for the first time to create data directory if you haven't already then use the following command to see the list of available countries:
 
-| Country          | Code | Country          | Code |
-| ---------------- | ---- | ---------------- | ---- |
-| Austria          | AT   | Italy            | IT   |
-| Belgium          | BE   | Japan            | JP   |
-| Bulgaria         | BG   | Latvia           | LV   |
-| Brazil           | BR   | Netherlands      | NL   |
-| Canada           | CA   | Norway           | NO   |
-| Switzerland      | CH   | Poland           | PL   |
-| Czech Republic   | CZ   | Romania          | RO   |
-| Germany          | DE   | Serbia           | RS   |
-| Denmark          | DK   | Sweden           | SE   |
-| Estonia          | EE   | Singapore        | SG   |
-| Spain            | ES   | Slovakia         | SK   |
-| Finland          | FI   | Ukraine          | UA   |
-| France           | FR   | United Kingdom   | GB   |
-| Hungary          | HU   | United States    | US   |
-| Ireland          | IE   | India            | IN   |
+```bash
+./psiphon -list
+```
+
 
 ## Usage
 
@@ -53,19 +40,41 @@ This command will start the Psiphon proxy and listen for SOCKS connections on `1
 ### Command-Line Flags
 
 ```
-Usage: psiphon [-b addr:port] [-c country] [-p proxy]
+Usage: psiphon [-b addr:port] [-c country] [-p proxy] [-wo|-mo|-mp] [-list]
 
   -b string
         SOCKS bind address (default "127.0.0.1:10808")
   -c string
-        Country code (e.g., US, DE, JP). See the list above for all valid values. (default "AT")
+        Country code (e.g., US, DE, JP). Use -list to see available values. (default "AT")
   -config string
         Psiphon config file. (if present, other flags are ignored)
   -d string
         Working directory (default "./")
+  -list
+        List available egress countries from the local data store
   -p string
-        Upstream proxy URL [format: socks5://127.0.0.1:1080].
+        Upstream SOCKS5 proxy URL [format: socks5://127.0.0.1:1080]
+  -wo
+        Enable Cloudflare WARP (WireGuard) only
+  -mo
+        Enable Cloudflare MASQUE (HTTP/2) only
+  -mp
+        Enable Cloudflare MASQUE (HTTP/2) over Psiphon
 ```
+
+Examples:
+
+```bash
+./psiphon -list
+./psiphon -c US
+./psiphon -wo
+./psiphon -mo
+./psiphon -mp -c US
+```
+
+Identity files:
+- WireGuard WARP: `data/warp/`
+- MASQUE: `data/masque/`
 
 ## Building from Source
 
@@ -73,7 +82,7 @@ If you wish to build the project yourself, you will need to have Go installed.
 
 ```bash
 # Clone the repository
-git clone https://github.com/Faran-17/custom-psiphon-core.git
+git clone https://github.com/lord-aali/psiphon-tunnel-core.git
 cd custom-psiphon-core
 
 # Build the project

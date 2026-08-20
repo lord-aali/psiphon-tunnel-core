@@ -4,7 +4,7 @@
 
 یک نسخه سفارشی از هسته تونل سایفون که با لیستی انتخاب شده از سرورها برای بهینه‌سازی عملکرد و اتصال، از پیش پیکربندی شده است.
 
-[<img src="https://raw.githubusercontent.com/Faran-17/custom-psiphon-core/main/assets/En-Button.svg" alt="English" width="120">](./README.md)
+[English version](./README.md)
 
 ## این پروژه چیست؟
 
@@ -18,25 +18,11 @@
 
 ## کشورهای پشتیبانی شده
 
-این نسخه برای کار با سرورهای کشورهای زیر پیکربندی شده است:
+اگر هنوز برنامه را اجرا نکرده اید آنرا اجرا کنید تا پوشه data و محتویات آن ایجاد شود سپس با دستور زیر لیست کشورهای موجود را ببینید:
 
-| کشور          | کد  | کشور          | کد  |
-| ---------------- | ---- | ---------------- | ---- |
-| اتریش          | AT   | ایتالیا            | IT   |
-| بلژیک          | BE   | ژاپن            | JP   |
-| بلغارستان         | BG   | لتونی           | LV   |
-| برزیل           | BR   | هلند      | NL   |
-| کانادا           | CA   | نروژ           | NO   |
-| سوئیس      | CH   | لهستان           | PL   |
-| جمهوری چک   | CZ   | رومانی          | RO   |
-| آلمان          | DE   | صربستان           | RS   |
-| دانمارک          | DK   | سوئد           | SE   |
-| استونی          | EE   | سنگاپور        | SG   |
-| اسپانیا            | ES   | اسلواکی         | SK   |
-| فنلاند          | FI   | اوکراین          | UA   |
-| فرانسه           | FR   | بریتانیا   | GB   |
-| مجارستان          | HU   | ایالات متحده    | US   |
-| ایرلند          | IE   | هند            | IN   |
+```bash
+./psiphon -list
+```
 
 ## نحوه استفاده
 
@@ -73,7 +59,7 @@ Usage: psiphon [-b addr:port] [-c country] [-p proxy]
 
 ```bash
 # کلون کردن ریپازیتوری
-git clone https://github.com/Faran-17/custom-psiphon-core.git
+git clone https://github.com/lord-aali/psiphon-tunnel-core.git
 cd custom-psiphon-core
 
 # ساخت پروژه

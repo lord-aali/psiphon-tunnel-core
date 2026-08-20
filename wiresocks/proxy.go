@@ -3,13 +3,14 @@ package wiresocks
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
+	"time"
+
 	"github.com/bepass-org/proxy/pkg/mixed"
 	"github.com/bepass-org/proxy/pkg/statute"
 	"github.com/bepass-org/psiphon/device"
 	"github.com/bepass-org/psiphon/tun/netstack"
-	"io"
-	"log"
-	"time"
 )
 
 // VirtualTun stores a reference to netstack network and DNS configuration

@@ -5,14 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
-	"github.com/refraction-networking/conjure/pkg/station/log"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/refraction-networking/conjure/pkg/station/log"
 )
 
 // Parameters provide an easier way to modify the tunnel config at runtime.
@@ -314,6 +318,70 @@ func (tunnel *Tunnel) Stop() {
 	tunnel.controllerWaitGroup.Wait()
 	tunnel.embeddedServerListWaitGroup.Wait()
 	psiphon.CloseDataStore()
+}
+
+// ListAvailableCountries returns sorted unique egress region codes found in
+// the local Psiphon datastore under workingDirectory. The datastore is
+// populated after the client has downloaded a remote server list at least once.
+// If configPath is not "null", that config file is used; otherwise a minimal
+// config sufficient to open the datastore is used.
+func ListAvailableCountries(workingDirectory string, configPath string) ([]string, error) {
+	configJSON := `{
+		"PropagationChannelId":"FFFFFFFFFFFFFFFF",
+		"SponsorId":"FFFFFFFFFFFFFFFF",
+		"DisableRemoteServerListFetcher": true
+	}`
+	if configPath != "null" {
+		bytes, err := os.ReadFile(configPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read config: %w", err)
+		}
+		configJSON = string(bytes)
+	}
+
+	config, err := psiphon.LoadConfig([]byte(configJSON))
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	config.DataRootDirectory = workingDirectory
+	config.MigrateDataStoreDirectory = workingDirectory
+
+	// Silence notices while scanning.
+	psiphon.SetNoticeWriter(io.Discard)
+
+	err = config.Commit(true)
+	if err != nil {
+		return nil, fmt.Errorf("config commit failed: %w", err)
+	}
+
+	err = psiphon.OpenDataStore(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open data store: %w", err)
+	}
+	defer psiphon.CloseDataStore()
+
+	regions := make(map[string]struct{})
+	err = psiphon.ScanServerEntries(func(serverEntry *protocol.ServerEntry) bool {
+		if serverEntry != nil && serverEntry.Region != "" {
+			regions[serverEntry.Region] = struct{}{}
+		}
+		return true
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan server entries: %w", err)
+	}
+
+	if len(regions) == 0 {
+		return nil, errors.New("no countries found in data store; run the client once to download the server list")
+	}
+
+	countries := make([]string, 0, len(regions))
+	for region := range regions {
+		countries = append(countries, region)
+	}
+	sort.Strings(countries)
+	return countries, nil
 }
 
 func RunPsiphon(proxy, localSocksPort, country string, workingDirectory string, config string, ctx context.Context) error {
