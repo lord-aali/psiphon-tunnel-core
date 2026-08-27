@@ -70,7 +70,7 @@ func maintainTunnel(ctx context.Context, cfg *Config, socksUpstream string, tunD
 		default:
 		}
 
-		log.Printf("Establishing MASQUE HTTP/2 tunnel to %s ...", cfg.H2Endpoint())
+		log.Printf("Establishing MASQUE HTTP/2 tunnel to %s (SNI %s) ...", cfg.H2Endpoint(), cfg.H2SNI())
 		ipConn, rsp, err := connectH2(ctx, cfg, socksUpstream)
 		if err != nil {
 			log.Printf("MASQUE connect failed: %v", err)

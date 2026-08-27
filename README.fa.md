@@ -18,7 +18,7 @@
 
 ## کشورهای پشتیبانی شده
 
-اگر هنوز برنامه را اجرا نکرده اید آنرا اجرا کنید تا پوشه data و محتویات آن ایجاد شود سپس با دستور زیر لیست کشورهای موجود را ببینید:
+اگر هنوز برنامه را اجرا نکرده‌اید آن را اجرا کنید تا پوشه data و محتویات آن ایجاد شود سپس با دستور زیر لیست کشورهای موجود را ببینید:
 
 ```bash
 ./psiphon -list
@@ -39,19 +39,67 @@
 ### فلگ‌های خط فرمان
 
 ```
-Usage: psiphon [-b addr:port] [-c country] [-p proxy]
+Usage: psiphon [-b addr:port] [-c country] [-p proxy] [-wo|-mo|-mp|-pm|-pw] [-masque-sni sni] [-masque-endpoint ip:port] [-warp-endpoint ip:port] [-scan-masque|-scan-warp] [-list]
 
   -b string
         آدرس اتصال SOCKS (پیش‌فرض "127.0.0.1:10808")
   -c string
-        کد کشور (مثلاً US, DE, JP). برای لیست کامل مقادیر معتبر به جدول بالا مراجعه کنید. (پیش‌فرض "AT")
+        کد کشور (مثلاً US, DE, JP). برای دیدن مقادیر معتبر از -list استفاده کنید. (پیش‌فرض "US")
   -config string
         فایل پیکربندی سایفون. (در صورت وجود، سایر فلگ‌ها نادیده گرفته می‌شوند)
   -d string
         پوشه کاری (پیش‌فرض "./")
+  -list
+        نمایش کشورهای خروجی موجود از داده‌های محلی
   -p string
-        URL پراکسی بالادستی [فرمت: socks5://127.0.0.1:1080].
+        URL پراکسی بالادستی SOCKS5 [فرمت: socks5://127.0.0.1:1080]
+  -wo
+        فقط Cloudflare WARP (WireGuard)
+  -mo
+        فقط Cloudflare MASQUE (HTTP/2)
+  -mp
+        Cloudflare MASQUE (HTTP/2) روی سایفون
+  -pm
+        سایفون روی Cloudflare MASQUE (HTTP/2)
+  -pw
+        سایفون روی Cloudflare WARP (WireGuard)
+  -masque-sni string
+        بازنویسی SNI مربوط به MASQUE (پیش‌فرض: consumer-masque.cloudflareclient.com)
+  -masque-endpoint string
+        بازنویسی نقطه اتصال MASQUE به صورت host:port (برای IPv6 به شکل [addr]:port؛ پیش‌فرض: 162.159.198.2:443)
+  -warp-endpoint string
+        بازنویسی نقطه اتصال WARP WireGuard به صورت host:port (برای IPv6 به شکل [addr]:port؛ پیش‌فرض: نقطه اتصال پروفایل)
+  -scan-masque
+        اسکن بازه‌های IPv4/IPv6 مربوط به MASQUE HTTP/2 برای یافتن نقطه اتصال سالم؛ خروجی در scan-masque.csv
+  -scan-warp
+        اسکن بازه‌های IPv4/IPv6 مربوط به WARP WireGuard برای یافتن نقطه اتصال سالم؛ خروجی در scan-warp.csv
 ```
+
+هر دو `-masque-endpoint` و `-warp-endpoint` از IPv4 و IPv6 پشتیبانی می‌کنند. آدرس IPv6 باید داخل براکت باشد: `[2606:4700:102::1]:443`.
+
+مثال‌ها:
+
+```bash
+./psiphon -list
+./psiphon -c US
+./psiphon -wo
+./psiphon -mo
+./psiphon -mp -c US
+./psiphon -pm -c US
+./psiphon -pw -c US
+./psiphon -mo -masque-endpoint 162.159.198.2:443 -masque-sni consumer-masque.cloudflareclient.com
+./psiphon -mo -masque-endpoint "[2606:4700:102::1]:443"
+./psiphon -wo -warp-endpoint 162.159.192.1:2408
+./psiphon -wo -warp-endpoint "[2606:4700:d0::1]:2408"
+./psiphon -pw -c US -warp-endpoint 162.159.193.1:2408
+./psiphon -pw -c US -warp-endpoint "[2606:4700:100::1]:2408"
+./psiphon -scan-masque
+./psiphon -scan-warp
+```
+
+فایل‌های هویت:
+- WireGuard WARP: `data/warp/`
+- MASQUE: `data/masque/`
 
 ## ساختن از سورس
 

@@ -40,12 +40,12 @@ This command will start the Psiphon proxy and listen for SOCKS connections on `1
 ### Command-Line Flags
 
 ```
-Usage: psiphon [-b addr:port] [-c country] [-p proxy] [-wo|-mo|-mp] [-list]
+Usage: psiphon [-b addr:port] [-c country] [-p proxy] [-wo|-mo|-mp|-pm|-pw] [-masque-sni sni] [-masque-endpoint ip:port] [-warp-endpoint ip:port] [-scan-masque|-scan-warp] [-list]
 
   -b string
         SOCKS bind address (default "127.0.0.1:10808")
   -c string
-        Country code (e.g., US, DE, JP). Use -list to see available values. (default "AT")
+        Country code (e.g., US, DE, JP). Use -list to see available values. (default "US")
   -config string
         Psiphon config file. (if present, other flags are ignored)
   -d string
@@ -60,7 +60,23 @@ Usage: psiphon [-b addr:port] [-c country] [-p proxy] [-wo|-mo|-mp] [-list]
         Enable Cloudflare MASQUE (HTTP/2) only
   -mp
         Enable Cloudflare MASQUE (HTTP/2) over Psiphon
+  -pm
+        Enable Psiphon over Cloudflare MASQUE (HTTP/2)
+  -pw
+        Enable Psiphon over Cloudflare WARP (WireGuard)
+  -masque-sni string
+        Override MASQUE TLS SNI (default: consumer-masque.cloudflareclient.com)
+  -masque-endpoint string
+        Override MASQUE endpoint as host:port (IPv6 as [addr]:port; default: 162.159.198.2:443)
+  -warp-endpoint string
+        Override WARP WireGuard endpoint as host:port (IPv6 as [addr]:port; default: profile endpoint)
+  -scan-masque
+        Scan MASQUE HTTP/2 IPv4/IPv6 ranges for working endpoints; write scan-masque.csv
+  -scan-warp
+        Scan WARP WireGuard IPv4/IPv6 ranges for working endpoints; write scan-warp.csv
 ```
+
+Both `-masque-endpoint` and `-warp-endpoint` accept IPv4 and IPv6. Use brackets for IPv6: `[2606:4700:102::1]:443`.
 
 Examples:
 
@@ -70,6 +86,16 @@ Examples:
 ./psiphon -wo
 ./psiphon -mo
 ./psiphon -mp -c US
+./psiphon -pm -c US
+./psiphon -pw -c US
+./psiphon -mo -masque-endpoint 162.159.198.2:443 -masque-sni consumer-masque.cloudflareclient.com
+./psiphon -mo -masque-endpoint "[2606:4700:102::1]:443"
+./psiphon -wo -warp-endpoint 162.159.192.1:2408
+./psiphon -wo -warp-endpoint "[2606:4700:d0::1]:2408"
+./psiphon -pw -c US -warp-endpoint 162.159.193.1:2408
+./psiphon -pw -c US -warp-endpoint "[2606:4700:100::1]:2408"
+./psiphon -scan-masque
+./psiphon -scan-warp
 ```
 
 Identity files:

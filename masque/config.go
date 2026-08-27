@@ -3,8 +3,25 @@ package masque
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 )
+
+const (
+	// DefaultH2Endpoint is the Cloudflare MASQUE HTTP/2 TCP address.
+	DefaultH2Endpoint = "162.159.198.2:443"
+	// DefaultH2SNI is the TLS SNI sent to the MASQUE HTTP/2 server.
+	DefaultH2SNI = "consumer-masque.cloudflareclient.com"
+)
+
+// DefaultH2CIDRs are Cloudflare MASQUE HTTP/2 (TCP 443) ranges.
+// WARP WireGuard ranges (162.159.192/193/195, 188.114.96–99) are not MASQUE.
+var DefaultH2CIDRs = []string{
+	"162.159.197.0/24",
+	"162.159.198.0/24",
+	"162.159.199.0/24",
+	"2606:4700:102::/48",
+}
 
 // Config is the persistent MASQUE identity (compatible with usque config.json).
 type Config struct {
@@ -20,15 +37,37 @@ type Config struct {
 	// EndpointH2V4 is the TCP address used for MASQUE over HTTP/2.
 	// Empty means the Cloudflare default.
 	EndpointH2V4 string `json:"endpoint_h2_v4,omitempty"`
-}
 
-const defaultH2Endpoint = "162.159.198.2:443"
+	sniOverride string
+}
 
 func (c *Config) H2Endpoint() string {
 	if c.EndpointH2V4 != "" {
 		return c.EndpointH2V4
 	}
-	return defaultH2Endpoint
+	return DefaultH2Endpoint
+}
+
+func (c *Config) H2SNI() string {
+	if c.sniOverride != "" {
+		return c.sniOverride
+	}
+	return DefaultH2SNI
+}
+
+// ApplyOverrides replaces the MASQUE HTTP/2 endpoint and/or TLS SNI when
+// non-empty. Empty values keep the predefined defaults (or values from config).
+func (c *Config) ApplyOverrides(endpoint, sni string) error {
+	if endpoint != "" {
+		if _, _, err := net.SplitHostPort(endpoint); err != nil {
+			return fmt.Errorf("masque-endpoint must be host:port: %w", err)
+		}
+		c.EndpointH2V4 = endpoint
+	}
+	if sni != "" {
+		c.sniOverride = sni
+	}
+	return nil
 }
 
 func LoadConfig(path string) (*Config, error) {

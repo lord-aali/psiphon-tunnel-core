@@ -188,6 +188,6 @@ func registerAndEnroll() (*Config, error) {
 		AccessToken:    account.Token,
 		IPv4:           account.Config.Interface.Addresses.V4,
 		IPv6:           account.Config.Interface.Addresses.V6,
-		EndpointH2V4:   defaultH2Endpoint,
+		EndpointH2V4:   DefaultH2Endpoint,
 	}, nil
 }

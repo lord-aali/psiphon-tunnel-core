@@ -12,15 +12,13 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/proxy"
 )
 
-const (
-	connectURI = "https://cloudflareaccess.com"
-	connectSNI = "consumer-masque.cloudflareclient.com"
-)
+const connectURI = "https://cloudflareaccess.com"
 
 // context ID 0 as a 1-byte QUIC varint.
 var contextIDZero = []byte{0x00}
@@ -54,29 +52,56 @@ func (c *ipConn) WritePacket(b []byte) (icmp []byte, err error) {
 }
 
 func connectH2(ctx context.Context, cfg *Config, socksAddr string) (*ipConn, *http.Response, error) {
-	privDER, err := base64.StdEncoding.DecodeString(cfg.PrivateKey)
-	if err != nil {
-		return nil, nil, fmt.Errorf("decode private key: %w", err)
-	}
-	privKey, err := x509.ParseECPrivateKey(privDER)
-	if err != nil {
-		return nil, nil, fmt.Errorf("parse private key: %w", err)
-	}
-	certDER, err := generateCert(privKey)
+	tlsConfig, err := ClientTLSConfig(cfg)
 	if err != nil {
 		return nil, nil, err
 	}
-	tlsConfig := &tls.Config{
+	return doConnectH2(ctx, tlsConfig, cfg.H2Endpoint(), socksAddr)
+}
+
+// ClientTLSConfig builds the MASQUE HTTP/2 client certificate + SNI config.
+func ClientTLSConfig(cfg *Config) (*tls.Config, error) {
+	privDER, err := base64.StdEncoding.DecodeString(cfg.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("decode private key: %w", err)
+	}
+	privKey, err := x509.ParseECPrivateKey(privDER)
+	if err != nil {
+		return nil, fmt.Errorf("parse private key: %w", err)
+	}
+	certDER, err := generateCert(privKey)
+	if err != nil {
+		return nil, err
+	}
+	return &tls.Config{
 		Certificates: []tls.Certificate{{
 			Certificate: certDER,
 			PrivateKey:  privKey,
 		}},
-		ServerName:         connectSNI,
+		ServerName:         cfg.H2SNI(),
 		NextProtos:         []string{"h2"},
 		InsecureSkipVerify: true,
-	}
+	}, nil
+}
 
-	client, err := newHTTP2Client(tlsConfig, cfg.H2Endpoint(), socksAddr)
+// ProbeH2 tries a MASQUE CONNECT-IP handshake against endpoint (host:port).
+// A 2xx status means the IP speaks MASQUE HTTP/2.
+func ProbeH2(ctx context.Context, tlsConfig *tls.Config, endpoint string) (time.Duration, int, error) {
+	start := time.Now()
+	conn, rsp, err := doConnectH2(ctx, tlsConfig, endpoint, "")
+	rtt := time.Since(start)
+	status := 0
+	if rsp != nil {
+		status = rsp.StatusCode
+	}
+	if conn != nil {
+		_ = conn.Close()
+	}
+	return rtt, status, err
+}
+
+func doConnectH2(ctx context.Context, tlsConfig *tls.Config, endpoint, socksAddr string) (*ipConn, *http.Response, error) {
+	client, err := newHTTP2Client(tlsConfig, endpoint, socksAddr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -99,12 +124,14 @@ func connectH2(ctx context.Context, cfg *Config, socksAddr string) (*ipConn, *ht
 	if err != nil {
 		_ = pr.Close()
 		_ = pw.Close()
+		client.CloseIdleConnections()
 		return nil, nil, err
 	}
 	if rsp.StatusCode < 200 || rsp.StatusCode > 299 {
 		_ = pr.Close()
 		_ = pw.Close()
 		_ = rsp.Body.Close()
+		client.CloseIdleConnections()
 		return nil, rsp, fmt.Errorf("masque server responded %d", rsp.StatusCode)
 	}
 

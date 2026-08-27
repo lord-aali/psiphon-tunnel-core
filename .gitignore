@@ -5,3 +5,4 @@ build/*
 build.bat
 start.bat
 data
+psiphon.exe
