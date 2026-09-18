@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"net/netip"
 	"time"
 
@@ -15,9 +16,22 @@ import (
 
 const mtu = 1280
 
-// StartSocks starts MASQUE over HTTP/2 and exposes a SOCKS proxy on bindAddress.
-// When socksUpstream is non-empty (host:port), the MASQUE TCP dial goes through that SOCKS5 proxy.
-func StartSocks(ctx context.Context, cfg *Config, bindAddress, socksUpstream string) error {
+type packetTunnel interface {
+	Close() error
+	ReadPacket([]byte) (int, error)
+	WritePacket([]byte) (icmp []byte, err error)
+}
+
+// TunnelOptions selects MASQUE transport and H2 obfuscation.
+type TunnelOptions struct {
+	SocksUpstream string
+	UseH3         bool
+	Fragment      FragmentConfig
+}
+
+// StartSocks starts MASQUE and exposes a SOCKS proxy on bindAddress.
+// When socksUpstream is non-empty (host:port), the MASQUE dial goes through that SOCKS5 proxy.
+func StartSocks(ctx context.Context, cfg *Config, bindAddress string, opts TunnelOptions) error {
 	localAddrs := make([]netip.Addr, 0, 2)
 	if cfg.IPv4 != "" {
 		v4, err := netip.ParseAddr(cfg.IPv4)
@@ -47,7 +61,7 @@ func StartSocks(ctx context.Context, cfg *Config, bindAddress, socksUpstream str
 		return fmt.Errorf("create masque tun: %w", err)
 	}
 
-	go maintainTunnel(ctx, cfg, socksUpstream, tunDev)
+	go maintainTunnel(ctx, cfg, opts, tunDev)
 
 	vt := &wiresocks.VirtualTun{
 		Tnet:      tnet,
@@ -61,7 +75,11 @@ func StartSocks(ctx context.Context, cfg *Config, bindAddress, socksUpstream str
 	return nil
 }
 
-func maintainTunnel(ctx context.Context, cfg *Config, socksUpstream string, tunDev tun.Device) {
+func maintainTunnel(ctx context.Context, cfg *Config, opts TunnelOptions, tunDev tun.Device) {
+	proto := "HTTP/2"
+	if opts.UseH3 {
+		proto = "HTTP/3"
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -70,8 +88,12 @@ func maintainTunnel(ctx context.Context, cfg *Config, socksUpstream string, tunD
 		default:
 		}
 
-		log.Printf("Establishing MASQUE HTTP/2 tunnel to %s (SNI %s) ...", cfg.H2Endpoint(), cfg.H2SNI())
-		ipConn, rsp, err := connectH2(ctx, cfg, socksUpstream)
+		log.Printf("Establishing MASQUE %s tunnel to %s (SNI %s) ...", proto, cfg.Endpoint(opts.UseH3), cfg.H2SNI())
+		if opts.Fragment.Enabled && !opts.UseH3 {
+			log.Printf("MASQUE HTTP/2 TLS fragment %d-%d bytes, delay %s-%s",
+				opts.Fragment.SizeMin, opts.Fragment.SizeMax, opts.Fragment.DelayMin, opts.Fragment.DelayMax)
+		}
+		ipConn, rsp, err := dialMasque(ctx, cfg, opts)
 		if err != nil {
 			log.Printf("MASQUE connect failed: %v", err)
 			time.Sleep(2 * time.Second)
@@ -83,7 +105,7 @@ func maintainTunnel(ctx context.Context, cfg *Config, socksUpstream string, tunD
 			time.Sleep(2 * time.Second)
 			continue
 		}
-		log.Println("Connected to MASQUE server (HTTP/2)")
+		log.Printf("Connected to MASQUE server (%s)", proto)
 		log.Println("Connected successfully.")
 
 		errCh := make(chan error, 2)
@@ -145,4 +167,11 @@ func maintainTunnel(ctx context.Context, cfg *Config, socksUpstream string, tunD
 		case <-time.After(time.Second):
 		}
 	}
+}
+
+func dialMasque(ctx context.Context, cfg *Config, opts TunnelOptions) (packetTunnel, *http.Response, error) {
+	if opts.UseH3 {
+		return connectH3(ctx, cfg, opts.SocksUpstream)
+	}
+	return connectH2(ctx, cfg, opts.SocksUpstream, opts.Fragment)
 }

@@ -40,7 +40,7 @@ This command will start the Psiphon proxy and listen for SOCKS connections on `1
 ### Command-Line Flags
 
 ```
-Usage: psiphon [-b addr:port] [-c country] [-p proxy] [-wo|-mo|-mp|-pm|-pw] [-masque-sni sni] [-masque-endpoint ip:port] [-warp-endpoint ip:port] [-scan-masque|-scan-warp] [-list]
+Usage: psiphon [-b addr:port] [-c country] [-p proxy] [-wo|-mo|-mp|-pm|-pw] [-masque-h3] [-masque-smart] [-masque-fragment] [-masque-sni sni] [-masque-endpoint ip:port] [-warp-endpoint ip:port] [-scan-masque|-scan-warp] [-list]
 
   -b string
         SOCKS bind address (default "127.0.0.1:10808")
@@ -57,23 +57,33 @@ Usage: psiphon [-b addr:port] [-c country] [-p proxy] [-wo|-mo|-mp|-pm|-pw] [-ma
   -wo
         Enable Cloudflare WARP (WireGuard) only
   -mo
-        Enable Cloudflare MASQUE (HTTP/2) only
+        Enable Cloudflare MASQUE only
   -mp
-        Enable Cloudflare MASQUE (HTTP/2) over Psiphon
+        Enable Cloudflare MASQUE over Psiphon
   -pm
-        Enable Psiphon over Cloudflare MASQUE (HTTP/2)
+        Enable Psiphon over Cloudflare MASQUE
   -pw
         Enable Psiphon over Cloudflare WARP (WireGuard)
+  -masque-h3
+        Use MASQUE HTTP/3 (QUIC) instead of HTTP/2 (default endpoint 162.159.198.1:443)
+  -masque-smart
+        Prefer HTTP/3, fall back to HTTP/2 (enable TLS fragment only if the SNI handshake fails), and auto-scan an endpoint if the defaults (and any saved endpoint) fail
+  -masque-fragment
+        Fragment the MASQUE HTTP/2 TLS ClientHello (TCP only; ignored with -masque-h3)
+  -masque-fragment-size string
+        Fragment size range in bytes (default "16-32")
+  -masque-fragment-delay string
+        Fragment delay range in milliseconds (default "2-10")
   -masque-sni string
         Override MASQUE TLS SNI (default: consumer-masque.cloudflareclient.com)
   -masque-endpoint string
-        Override MASQUE endpoint as host:port (IPv6 as [addr]:port; default: 162.159.198.2:443)
+        Override MASQUE endpoint as host:port (IPv6 as [addr]:port; default H2: 162.159.198.2:443, H3: 162.159.198.1:443)
   -warp-endpoint string
         Override WARP WireGuard endpoint as host:port (IPv6 as [addr]:port; default: profile endpoint)
   -scan-masque
-        Scan MASQUE HTTP/2 IPv4/IPv6 ranges for working endpoints; write scan-masque.csv
+        Scan MASQUE ranges Aether-style (seeds, sampled CIDRs, fallback ports, CONNECT-IP data-plane); add -masque-h3 for HTTP/3; write scan-masque.csv
   -scan-warp
-        Scan WARP WireGuard IPv4/IPv6 ranges for working endpoints; write scan-warp.csv
+        Scan WARP WireGuard ranges Aether-style (seeds, sampled CIDRs, rotated UDP ports, handshake); write scan-warp.csv
 ```
 
 Both `-masque-endpoint` and `-warp-endpoint` accept IPv4 and IPv6. Use brackets for IPv6: `[2606:4700:102::1]:443`.
@@ -89,7 +99,12 @@ Examples:
 ./psiphon -pm -c US
 ./psiphon -pw -c US
 ./psiphon -mo -masque-endpoint 162.159.198.2:443 -masque-sni consumer-masque.cloudflareclient.com
+./psiphon -mo -masque-h3
+./psiphon -mo -masque-smart
+./psiphon -mo -masque-h3 -masque-endpoint 162.159.198.1:443
+./psiphon -mo -masque-fragment
 ./psiphon -mo -masque-endpoint "[2606:4700:102::1]:443"
+./psiphon -scan-masque -masque-h3
 ./psiphon -wo -warp-endpoint 162.159.192.1:2408
 ./psiphon -wo -warp-endpoint "[2606:4700:d0::1]:2408"
 ./psiphon -pw -c US -warp-endpoint 162.159.193.1:2408
@@ -100,7 +115,7 @@ Examples:
 
 Identity files:
 - WireGuard WARP: `data/warp/`
-- MASQUE: `data/masque/`
+- MASQUE: `data/masque/` (`config.json` stores `endpoint_h2_v4`, `protocol` (`h3`/`h2`), and `fragment`)
 
 ## Building from Source
 

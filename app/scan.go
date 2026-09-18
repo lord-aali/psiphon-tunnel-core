@@ -2,9 +2,12 @@ package app
 
 import (
 	"context"
-	"crypto/rand"
+	"crypto/tls"
+	"encoding/binary"
 	"encoding/csv"
 	"fmt"
+	"log"
+	"math/rand"
 	"net"
 	"net/netip"
 	"os"
@@ -20,17 +23,20 @@ import (
 )
 
 const (
-	scanMasquePort    = 443
-	scanMasqueWorkers = 16
-	scanMasqueTimeout = 4 * time.Second
-	scanMasqueCSV     = "scan-masque.csv"
+	scanMasqueCSV = "scan-masque.csv"
+	scanWarpCSV   = "scan-warp.csv"
 
-	scanWarpWorkers = 32
-	scanWarpTimeout = 2 * time.Second
-	scanWarpCSV     = "scan-warp.csv"
+	// Thorough IPv4 sweep (Aether full_subnet): every host in each /24.
+	// Balanced-style random sampling skipped .116 in 162.159.198.0/24.
+	scanMasqueWorkers   = 16
+	scanMasqueTimeout   = 12 * time.Second
+	scanMasqueH3Timeout = 15 * time.Second
+	scanMasqueSampleV6  = 140
 
-	ipv6SequentialPerCIDR = 256
-	ipv6RandomPerCIDR     = 256
+	scanWarpWorkers   = 8
+	scanWarpTimeout   = 7 * time.Second
+	scanWarpSampleV6  = 120
+	scanWarpPortWaves = 3
 )
 
 type scanHit struct {
@@ -39,10 +45,16 @@ type scanHit struct {
 	rtt  time.Duration
 }
 
-type ipProbeFunc func(ctx context.Context, ip netip.Addr) (port int, rtt time.Duration, err error)
+type scanTarget struct {
+	ip   netip.Addr
+	port int
+}
 
-// RunMasqueScan probes MASQUE HTTP/2 ranges with a real CONNECT-IP handshake.
-func RunMasqueScan(workingDirectory, masqueSNI string, ctx context.Context) error {
+type endpointProbeFunc func(ctx context.Context, ip netip.Addr, port int) (time.Duration, error)
+
+// RunMasqueScan probes MASQUE ranges with CONNECT-IP plus a data-plane DNS check,
+// using Aether's CIDRs, seeds, ports, and interleaved sampling.
+func RunMasqueScan(workingDirectory, masqueSNI string, useH3 bool, ctx context.Context) error {
 	masqueDir := filepath.Join(workingDirectory, "data", "masque")
 	cfg, err := masque.EnsureIdentity(masqueDir)
 	if err != nil {
@@ -51,35 +63,201 @@ func RunMasqueScan(workingDirectory, masqueSNI string, ctx context.Context) erro
 	if err := cfg.ApplyOverrides("", masqueSNI); err != nil {
 		return err
 	}
+
+	useIPv6 := ipv6Available()
+	targets, err := buildMasqueTargets(true, useIPv6)
+	if err != nil {
+		return err
+	}
+
+	label := fmt.Sprintf("MASQUE HTTP/2 data-plane (SNI %s)", cfg.H2SNI())
+	timeout := scanMasqueTimeout
+	workers := scanMasqueWorkers
+	if useH3 {
+		label = fmt.Sprintf("MASQUE HTTP/3 data-plane (SNI %s)", cfg.H2SNI())
+		timeout = scanMasqueH3Timeout
+		workers = 8
+	}
+	if !useIPv6 {
+		fmt.Fprintln(os.Stderr, "IPv6 is not available; scanning IPv4 only")
+	}
+
 	tlsCfg, err := masque.ClientTLSConfig(cfg)
 	if err != nil {
 		return err
 	}
 
-	probe := func(ctx context.Context, ip netip.Addr) (int, time.Duration, error) {
-		endpoint := net.JoinHostPort(ip.String(), strconv.Itoa(scanMasquePort))
-		probeCtx, cancel := context.WithTimeout(ctx, scanMasqueTimeout)
+	probe := func(ctx context.Context, ip netip.Addr, port int) (time.Duration, error) {
+		endpoint := net.JoinHostPort(ip.String(), strconv.Itoa(port))
+		probeCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		rtt, status, err := masque.ProbeH2(probeCtx, tlsCfg, endpoint)
+		var (
+			rtt    time.Duration
+			status int
+			err    error
+		)
+		if useH3 {
+			rtt, status, err = masque.ProbeH3(probeCtx, cfg, endpoint, "")
+		} else {
+			rtt, status, err = masque.ProbeH2(probeCtx, cfg, tlsCfg, endpoint, "", masque.FragmentConfig{})
+		}
 		if err != nil {
-			return 0, 0, err
+			return 0, err
 		}
 		if status < 200 || status > 299 {
-			return 0, 0, fmt.Errorf("masque status %d", status)
+			return 0, fmt.Errorf("masque status %d", status)
 		}
-		return scanMasquePort, rtt, nil
+		return rtt, nil
 	}
 
-	return runIPScan(ctx, scanOpts{
-		label:   fmt.Sprintf("MASQUE HTTP/2 (SNI %s)", cfg.H2SNI()),
-		cidrs:   masque.DefaultH2CIDRs,
+	return runEndpointScan(ctx, scanEndpointOpts{
+		label:   label,
+		targets: targets,
 		csvName: filepath.Join(workingDirectory, scanMasqueCSV),
-		workers: scanMasqueWorkers,
+		workers: workers,
 		probe:   probe,
 	})
 }
 
-// RunWarpScan probes WARP WireGuard ranges with a handshake on UDP 2408.
+type masqueHit struct {
+	endpoint string
+	useH3    bool
+	fragment masque.FragmentConfig
+}
+
+// scanFirstMasqueEndpoint probes targets until one CONNECT-IP + data-plane
+// check succeeds. HTTP/3 is tried first, then HTTP/2 without fragment, then
+// HTTP/2 with TLS fragment.
+func scanFirstMasqueEndpoint(ctx context.Context, cfg *masque.Config, tlsCfg *tls.Config, socksAddr string, fragment masque.FragmentConfig, skip map[string]struct{}) (string, bool, masque.FragmentConfig, error) {
+	useIPv6 := ipv6Available()
+	targets, err := buildMasqueSmartTargets(true, useIPv6)
+	if err != nil {
+		return "", false, masque.FragmentConfig{}, err
+	}
+	if skip == nil {
+		skip = map[string]struct{}{}
+	}
+	filtered := make([]scanTarget, 0, len(targets))
+	for _, t := range targets {
+		ep := net.JoinHostPort(t.ip.String(), strconv.Itoa(t.port))
+		if _, ok := skip[ep]; ok {
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	if len(filtered) == 0 {
+		return "", false, masque.FragmentConfig{}, fmt.Errorf("masque smart: no endpoints left to scan")
+	}
+
+	scanCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	jobs := make(chan scanTarget)
+	hits := make(chan masqueHit, 1)
+	var scanned atomic.Int64
+	total := len(filtered)
+
+	var workers sync.WaitGroup
+	workerN := 8
+	if workerN > total {
+		workerN = total
+	}
+	for i := 0; i < workerN; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for t := range jobs {
+				if scanCtx.Err() != nil {
+					return
+				}
+				endpoint := net.JoinHostPort(t.ip.String(), strconv.Itoa(t.port))
+				scanned.Add(1)
+
+				h3Ctx, h3Cancel := context.WithTimeout(scanCtx, scanMasqueH3Timeout)
+				_, status, err := masque.ProbeH3(h3Ctx, cfg, endpoint, socksAddr)
+				h3Cancel()
+				if err == nil && status >= 200 && status <= 299 {
+					select {
+					case hits <- masqueHit{endpoint: endpoint, useH3: true}:
+						cancel()
+					default:
+					}
+					return
+				}
+				if scanCtx.Err() != nil {
+					return
+				}
+
+				if frag, ok := probeH2AutoFragment(scanCtx, cfg, tlsCfg, endpoint, socksAddr, "scan", fragment); ok {
+					select {
+					case hits <- masqueHit{endpoint: endpoint, fragment: frag}:
+						cancel()
+					default:
+					}
+					return
+				}
+			}
+		}()
+	}
+
+	go func() {
+		defer close(jobs)
+		for _, t := range filtered {
+			select {
+			case <-scanCtx.Done():
+				return
+			case jobs <- t:
+			}
+		}
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		workers.Wait()
+		close(done)
+	}()
+
+	log.Printf("MASQUE smart: scanning %d endpoints for the first working address ...", total)
+	statusTick := time.NewTicker(2 * time.Second)
+	defer statusTick.Stop()
+
+	for {
+		select {
+		case hit := <-hits:
+			return finishMasqueHit(hit)
+		case <-statusTick.C:
+			log.Printf("MASQUE smart: scanned %d/%d", scanned.Load(), total)
+		case <-done:
+			select {
+			case hit := <-hits:
+				return finishMasqueHit(hit)
+			default:
+				if ctx.Err() != nil {
+					return "", false, masque.FragmentConfig{}, ctx.Err()
+				}
+				return "", false, masque.FragmentConfig{}, fmt.Errorf("masque smart: no working endpoint found")
+			}
+		case <-ctx.Done():
+			return "", false, masque.FragmentConfig{}, ctx.Err()
+		}
+	}
+}
+
+func finishMasqueHit(hit masqueHit) (string, bool, masque.FragmentConfig, error) {
+	if hit.useH3 {
+		log.Printf("MASQUE smart: found HTTP/3 %s", hit.endpoint)
+		return hit.endpoint, true, masque.FragmentConfig{}, nil
+	}
+	if hit.fragment.Enabled {
+		log.Printf("MASQUE smart: found HTTP/2 %s with TLS fragment", hit.endpoint)
+	} else {
+		log.Printf("MASQUE smart: found HTTP/2 %s without TLS fragment", hit.endpoint)
+	}
+	return hit.endpoint, false, hit.fragment, nil
+}
+
+// RunWarpScan probes WARP WireGuard ranges with a real handshake, using Aether's
+// prefixes, seeds, and rotated UDP port waves.
 func RunWarpScan(workingDirectory string, ctx context.Context) error {
 	warpDir := filepath.Join(workingDirectory, "data", "warp")
 	if err := os.MkdirAll(warpDir, 0755); err != nil {
@@ -104,47 +282,47 @@ func RunWarpScan(workingDirectory string, ctx context.Context) error {
 		return fmt.Errorf("warp profile missing keys")
 	}
 
-	probe := func(ctx context.Context, ip netip.Addr) (int, time.Duration, error) {
-		endpoint := net.JoinHostPort(ip.String(), strconv.Itoa(warp.DefaultPort))
+	useIPv6 := ipv6Available()
+	targets, err := buildWarpTargets(true, useIPv6)
+	if err != nil {
+		return err
+	}
+	if !useIPv6 {
+		fmt.Fprintln(os.Stderr, "IPv6 is not available; scanning IPv4 only")
+	}
+
+	probe := func(ctx context.Context, ip netip.Addr, port int) (time.Duration, error) {
+		endpoint := net.JoinHostPort(ip.String(), strconv.Itoa(port))
 		probeCtx, cancel := context.WithTimeout(ctx, scanWarpTimeout)
 		defer cancel()
 		start := time.Now()
-		err := warp.Handshake(probeCtx, endpoint, privateKey, peerPublicKey, "")
-		if err != nil {
-			return 0, 0, err
+		if err := warp.Handshake(probeCtx, endpoint, privateKey, peerPublicKey, ""); err != nil {
+			return 0, err
 		}
-		return warp.DefaultPort, time.Since(start), nil
+		return time.Since(start), nil
 	}
 
-	return runIPScan(ctx, scanOpts{
-		label:   "WARP WireGuard",
-		cidrs:   warp.DefaultCIDRs,
+	return runEndpointScan(ctx, scanEndpointOpts{
+		label:   "WARP WireGuard handshake",
+		targets: targets,
 		csvName: filepath.Join(workingDirectory, scanWarpCSV),
 		workers: scanWarpWorkers,
 		probe:   probe,
 	})
 }
 
-type scanOpts struct {
+type scanEndpointOpts struct {
 	label   string
-	cidrs   []string
+	targets []scanTarget
 	csvName string
 	workers int
-	probe   ipProbeFunc
+	probe   endpointProbeFunc
 }
 
-func runIPScan(ctx context.Context, opts scanOpts) error {
-	useIPv6 := ipv6Available()
-	ips, err := expandCIDRs(opts.cidrs, true, useIPv6)
-	if err != nil {
-		return err
-	}
-	total := len(ips)
+func runEndpointScan(ctx context.Context, opts scanEndpointOpts) error {
+	total := len(opts.targets)
 	if total == 0 {
 		return fmt.Errorf("scan list is empty")
-	}
-	if !useIPv6 {
-		fmt.Fprintln(os.Stderr, "IPv6 is not available; scanning IPv4 only")
 	}
 
 	f, err := os.Create(opts.csvName)
@@ -159,10 +337,10 @@ func runIPScan(ctx context.Context, opts scanOpts) error {
 	}
 	w.Flush()
 
-	fmt.Fprintf(os.Stderr, "Scanning %d %s IPs (Ctrl+C to stop). Results: %s\n",
+	fmt.Fprintf(os.Stderr, "Scanning %d %s endpoints (Ctrl+C to stop). Results: %s\n",
 		total, opts.label, opts.csvName)
 
-	jobs := make(chan netip.Addr)
+	jobs := make(chan scanTarget)
 	hits := make(chan scanHit, opts.workers)
 	var scanned atomic.Int64
 	var cleanCount atomic.Int64
@@ -172,14 +350,14 @@ func runIPScan(ctx context.Context, opts scanOpts) error {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			for ip := range jobs {
+			for t := range jobs {
 				if ctx.Err() != nil {
 					continue
 				}
-				port, rtt, err := opts.probe(ctx, ip)
+				rtt, err := opts.probe(ctx, t.ip, t.port)
 				scanned.Add(1)
 				if err == nil {
-					hits <- scanHit{ip: ip, port: port, rtt: rtt}
+					hits <- scanHit{ip: t.ip, port: t.port, rtt: rtt}
 				}
 			}
 		}()
@@ -187,11 +365,11 @@ func runIPScan(ctx context.Context, opts scanOpts) error {
 
 	go func() {
 		defer close(jobs)
-		for _, ip := range ips {
+		for _, t := range opts.targets {
 			select {
 			case <-ctx.Done():
 				return
-			case jobs <- ip:
+			case jobs <- t:
 			}
 		}
 	}()
@@ -242,7 +420,7 @@ func runIPScan(ctx context.Context, opts scanOpts) error {
 
 	printStatus()
 	fmt.Fprintln(os.Stderr)
-	noun := "IP(s)"
+	noun := "endpoint(s)"
 	if ctx.Err() != nil {
 		fmt.Fprintf(os.Stderr, "Scan stopped. %d clean %s saved to %s\n", cleanCount.Load(), noun, opts.csvName)
 		return nil
@@ -251,101 +429,317 @@ func runIPScan(ctx context.Context, opts scanOpts) error {
 	return nil
 }
 
-func expandCIDRs(cidrs []string, useIPv4, useIPv6 bool) ([]netip.Addr, error) {
-	seen := make(map[netip.Addr]struct{})
-	var ips []netip.Addr
-	add := func(addr netip.Addr) {
-		if _, ok := seen[addr]; ok {
+func buildMasqueTargets(useIPv4, useIPv6 bool) ([]scanTarget, error) {
+	return assembleMasqueTargets(useIPv4, useIPv6, false)
+}
+
+func buildMasqueSmartTargets(useIPv4, useIPv6 bool) ([]scanTarget, error) {
+	return assembleMasqueTargets(useIPv4, useIPv6, true)
+}
+
+func assembleMasqueTargets(useIPv4, useIPv6, preferFirstCIDR bool) ([]scanTarget, error) {
+	ports := masque.ScanPorts
+	primary := ports[0]
+	var out []scanTarget
+	seen := make(map[scanTarget]struct{})
+	push := func(ip netip.Addr, port int) {
+		t := scanTarget{ip: ip, port: port}
+		if _, ok := seen[t]; ok {
 			return
 		}
-		seen[addr] = struct{}{}
-		ips = append(ips, addr)
+		seen[t] = struct{}{}
+		out = append(out, t)
 	}
 
-	for _, raw := range cidrs {
-		prefix, err := netip.ParsePrefix(raw)
-		if err != nil {
-			return nil, fmt.Errorf("invalid cidr %s: %w", raw, err)
-		}
-		prefix = prefix.Masked()
-		is4 := prefix.Addr().Is4()
-		if (is4 && !useIPv4) || (!is4 && !useIPv6) {
-			continue
-		}
-		if is4 {
-			for _, addr := range enumeratePrefix(prefix, 0) {
-				add(addr)
-			}
-			continue
-		}
-		for _, addr := range enumeratePrefix(prefix, ipv6SequentialPerCIDR) {
-			add(addr)
-		}
-		hostBits := prefix.Addr().BitLen() - prefix.Bits()
-		if hostBits <= 8 {
-			continue
-		}
-		added := 0
-		for i := 0; i < ipv6RandomPerCIDR*8 && added < ipv6RandomPerCIDR; i++ {
-			addr, err := randomAddrInPrefix(prefix)
+	var seeds4, seeds6 []netip.Addr
+	if useIPv4 {
+		if preferFirstCIDR {
+			prefHosts, err := enumerateCIDRv4(masque.PreferredScanCIDRv4)
 			if err != nil {
 				return nil, err
 			}
-			before := len(ips)
-			add(addr)
-			if len(ips) > before {
-				added++
+			for _, ip := range prefHosts {
+				push(ip, primary)
+			}
+		}
+		for _, s := range masque.ScanSeedsV4 {
+			ip, err := netip.ParseAddr(s)
+			if err != nil {
+				return nil, err
+			}
+			seeds4 = append(seeds4, ip)
+			push(ip, primary)
+		}
+		groups := make([][]netip.Addr, 0, len(masque.ScanCIDRsV4))
+		for _, cidr := range masque.ScanCIDRsV4 {
+			if preferFirstCIDR && cidr == masque.PreferredScanCIDRv4 {
+				continue
+			}
+			hosts, err := enumerateCIDRv4(cidr)
+			if err != nil {
+				return nil, err
+			}
+			groups = append(groups, hosts)
+		}
+		interleavePush(groups, func(ip netip.Addr) { push(ip, primary) })
+	}
+
+	if useIPv6 {
+		for _, s := range masque.ScanSeedsV6 {
+			ip, err := netip.ParseAddr(s)
+			if err != nil {
+				return nil, err
+			}
+			seeds6 = append(seeds6, ip)
+			push(ip, primary)
+		}
+		groups := make([][]netip.Addr, 0, len(masque.ScanCIDRsV6))
+		for _, cidr := range masque.ScanCIDRsV6 {
+			hosts, err := sampleCIDRv6(cidr, scanMasqueSampleV6, masque.ScanCIDRsV4)
+			if err != nil {
+				return nil, err
+			}
+			groups = append(groups, hosts)
+		}
+		interleavePush(groups, func(ip netip.Addr) { push(ip, primary) })
+	}
+
+	if useIPv4 {
+		for _, ip := range seeds4 {
+			for _, port := range ports[1:] {
+				push(ip, port)
 			}
 		}
 	}
-	return ips, nil
+	if useIPv6 {
+		for _, ip := range seeds6 {
+			for _, port := range ports[1:] {
+				push(ip, port)
+			}
+		}
+	}
+	return out, nil
 }
 
-func enumeratePrefix(prefix netip.Prefix, limit int) []netip.Addr {
-	var ips []netip.Addr
-	addr := prefix.Addr()
-	for {
-		if !prefix.Contains(addr) {
-			break
-		}
-		ips = append(ips, addr)
-		if limit > 0 && len(ips) >= limit {
-			break
-		}
-		next := addr.Next()
-		if !next.IsValid() {
-			break
-		}
-		addr = next
+func buildWarpTargets(useIPv4, useIPv6 bool) ([]scanTarget, error) {
+	ports := warp.ScanPorts
+	if len(ports) == 0 {
+		ports = []int{warp.DefaultPort}
 	}
-	return ips
+
+	var anchors, pool []netip.Addr
+	if useIPv4 {
+		for _, s := range warp.ScanSeedsV4 {
+			ip, err := netip.ParseAddr(s)
+			if err != nil {
+				return nil, err
+			}
+			anchors = append(anchors, ip)
+		}
+		groups := make([][]netip.Addr, 0, len(warp.ScanCIDRsV4))
+		for _, cidr := range warp.ScanCIDRsV4 {
+			hosts, err := enumerateCIDRv4(cidr)
+			if err != nil {
+				return nil, err
+			}
+			groups = append(groups, hosts)
+		}
+		interleavePush(groups, func(ip netip.Addr) { pool = append(pool, ip) })
+	}
+	if useIPv6 {
+		for _, s := range warp.ScanSeedsV6 {
+			ip, err := netip.ParseAddr(s)
+			if err != nil {
+				return nil, err
+			}
+			anchors = append(anchors, ip)
+		}
+		groups := make([][]netip.Addr, 0, len(warp.ScanCIDRsV6))
+		for _, cidr := range warp.ScanCIDRsV6 {
+			hosts, err := sampleCIDRv6(cidr, scanWarpSampleV6, warp.ScanCIDRsV4)
+			if err != nil {
+				return nil, err
+			}
+			groups = append(groups, hosts)
+		}
+		interleavePush(groups, func(ip netip.Addr) { pool = append(pool, ip) })
+	}
+
+	seenIP := make(map[netip.Addr]struct{})
+	ips := make([]netip.Addr, 0, len(anchors)+len(pool))
+	for _, ip := range append(anchors, pool...) {
+		if _, ok := seenIP[ip]; ok {
+			continue
+		}
+		seenIP[ip] = struct{}{}
+		ips = append(ips, ip)
+	}
+
+	var out []scanTarget
+	seen := make(map[scanTarget]struct{})
+	push := func(ip netip.Addr, port int) {
+		t := scanTarget{ip: ip, port: port}
+		if _, ok := seen[t]; ok {
+			return
+		}
+		seen[t] = struct{}{}
+		out = append(out, t)
+	}
+	for wave := 0; wave < scanWarpPortWaves; wave++ {
+		for idx, ip := range ips {
+			push(ip, ports[(idx+wave)%len(ports)])
+		}
+	}
+	return out, nil
 }
 
-func randomAddrInPrefix(prefix netip.Prefix) (netip.Addr, error) {
-	base := prefix.Masked().Addr()
-	if !base.Is6() {
-		return netip.Addr{}, fmt.Errorf("randomAddrInPrefix requires IPv6")
+func interleavePush(groups [][]netip.Addr, emit func(netip.Addr)) {
+	maxLen := 0
+	for _, g := range groups {
+		if len(g) > maxLen {
+			maxLen = len(g)
+		}
 	}
-	a := base.As16()
-	var rnd [16]byte
-	if _, err := rand.Read(rnd[:]); err != nil {
-		return netip.Addr{}, err
+	for i := 0; i < maxLen; i++ {
+		for _, g := range groups {
+			if i < len(g) {
+				emit(g[i])
+			}
+		}
 	}
-	for bit := prefix.Bits(); bit < 128; bit++ {
-		byteIdx := bit / 8
-		shift := uint(7 - (bit % 8))
-		mask := byte(1 << shift)
-		a[byteIdx] = (a[byteIdx] &^ mask) | (rnd[byteIdx] & mask)
+}
+
+func enumerateCIDRv4(cidr string) ([]netip.Addr, error) {
+	prefix, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cidr %s: %w", cidr, err)
 	}
-	return netip.AddrFrom16(a), nil
+	prefix = prefix.Masked()
+	if !prefix.Addr().Is4() {
+		return nil, fmt.Errorf("not ipv4 cidr: %s", cidr)
+	}
+	addr4 := prefix.Addr().As4()
+	base := binary.BigEndian.Uint32(addr4[:])
+	hostBits := 32 - prefix.Bits()
+	if hostBits <= 0 {
+		return []netip.Addr{prefix.Addr()}, nil
+	}
+	if hostBits > 12 {
+		return sampleCIDRv4(cidr, 140)
+	}
+	size := uint32(1) << hostBits
+	if size <= 2 {
+		return []netip.Addr{prefix.Addr()}, nil
+	}
+	out := make([]netip.Addr, 0, size-2)
+	for off := uint32(1); off < size-1; off++ {
+		var a [4]byte
+		binary.BigEndian.PutUint32(a[:], base+off)
+		out = append(out, netip.AddrFrom4(a))
+	}
+	return out, nil
+}
+
+func sampleCIDRv4(cidr string, n int) ([]netip.Addr, error) {
+	prefix, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cidr %s: %w", cidr, err)
+	}
+	prefix = prefix.Masked()
+	if !prefix.Addr().Is4() {
+		return nil, fmt.Errorf("not ipv4 cidr: %s", cidr)
+	}
+	addr4 := prefix.Addr().As4()
+	base := binary.BigEndian.Uint32(addr4[:])
+	hostBits := 32 - prefix.Bits()
+	if hostBits <= 0 {
+		return []netip.Addr{prefix.Addr()}, nil
+	}
+	size := uint32(1) << hostBits
+	if size <= 2 {
+		return []netip.Addr{prefix.Addr()}, nil
+	}
+	usable := size - 2
+	want := uint32(n)
+	if want > usable {
+		want = usable
+	}
+	chosen := make(map[uint32]struct{}, want)
+	out := make([]netip.Addr, 0, want)
+	for uint32(len(out)) < want {
+		off := 1 + uint32(rand.Intn(int(usable)))
+		if _, ok := chosen[off]; ok {
+			continue
+		}
+		chosen[off] = struct{}{}
+		var a [4]byte
+		binary.BigEndian.PutUint32(a[:], base+off)
+		out = append(out, netip.AddrFrom4(a))
+	}
+	return out, nil
+}
+
+func sampleCIDRv6(cidr string, n int, v4CIDRs []string) ([]netip.Addr, error) {
+	prefix, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cidr %s: %w", cidr, err)
+	}
+	prefix = prefix.Masked()
+	if !prefix.Addr().Is6() {
+		return nil, fmt.Errorf("not ipv6 cidr: %s", cidr)
+	}
+	if 128-prefix.Bits() == 0 {
+		return []netip.Addr{prefix.Addr()}, nil
+	}
+
+	var v4nets []netip.Prefix
+	for _, raw := range v4CIDRs {
+		p, err := netip.ParsePrefix(raw)
+		if err != nil {
+			continue
+		}
+		if p.Addr().Is4() {
+			v4nets = append(v4nets, p.Masked())
+		}
+	}
+
+	base := prefix.Addr().As16()
+	out := make([]netip.Addr, 0, n)
+	for i := 0; i < n; i++ {
+		var embedded uint32
+		if len(v4nets) == 0 {
+			embedded = rand.Uint32()
+		} else {
+			p := v4nets[rand.Intn(len(v4nets))]
+			hostBits := 32 - p.Bits()
+			a4 := p.Addr().As4()
+			b := binary.BigEndian.Uint32(a4[:])
+			if hostBits <= 0 {
+				embedded = b
+			} else {
+				mask := uint32((uint64(1) << hostBits) - 1)
+				embedded = b | (rand.Uint32() & mask)
+			}
+		}
+		var full [16]byte
+		copy(full[:], base[:])
+		full[12] = byte(embedded >> 24)
+		full[13] = byte(embedded >> 16)
+		full[14] = byte(embedded >> 8)
+		full[15] = byte(embedded)
+		out = append(out, netip.AddrFrom16(full))
+	}
+	return out, nil
 }
 
 func ipv6Available() bool {
-	d := net.Dialer{Timeout: 3 * time.Second}
-	conn, err := d.Dial("tcp6", "[2001:4860:4860::8888]:80")
+	c, err := net.ListenUDP("udp6", &net.UDPAddr{IP: net.IPv6unspecified, Port: 0})
 	if err != nil {
 		return false
 	}
-	_ = conn.Close()
-	return true
+	defer c.Close()
+	dst := &net.UDPAddr{IP: net.ParseIP("2606:4700:d0::a29f:c001"), Port: 443}
+	_ = c.SetDeadline(time.Now().Add(3 * time.Second))
+	_, err = c.WriteTo([]byte{0}, dst)
+	return err == nil
 }

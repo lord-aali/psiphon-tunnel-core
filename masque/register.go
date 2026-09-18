@@ -94,6 +94,11 @@ func EnsureIdentity(dir string) (*Config, error) {
 	return cfg, nil
 }
 
+// IdentityPath is the MASQUE config.json under dir.
+func IdentityPath(dir string) string {
+	return filepath.Join(dir, configName)
+}
+
 func registerAndEnroll() (*Config, error) {
 	wgKey := make([]byte, 32)
 	if _, err := rand.Read(wgKey); err != nil {
@@ -188,6 +193,5 @@ func registerAndEnroll() (*Config, error) {
 		AccessToken:    account.Token,
 		IPv4:           account.Config.Interface.Addresses.V4,
 		IPv6:           account.Config.Interface.Addresses.V6,
-		EndpointH2V4:   DefaultH2Endpoint,
 	}, nil
 }

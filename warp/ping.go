@@ -16,8 +16,6 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
-const handshakeTimeout = 2 * time.Second
-
 // Handshake sends a WireGuard handshake initiation to addr and waits for a
 // valid response. Empty presharedKey is treated as 32 zero bytes.
 func Handshake(ctx context.Context, addr, privateKey, peerPublicKey, presharedKey string) error {
@@ -91,8 +89,8 @@ func Handshake(ctx context.Context, addr, privateKey, peerPublicKey, presharedKe
 	}
 	defer conn.Close()
 
-	deadline := time.Now().Add(handshakeTimeout)
-	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+	deadline := time.Now().Add(7 * time.Second)
+	if ctxDeadline, ok := ctx.Deadline(); ok {
 		deadline = ctxDeadline
 	}
 	_ = conn.SetDeadline(deadline)

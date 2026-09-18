@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	MasqueDefaultSNI      = masque.DefaultH2SNI
-	MasqueDefaultEndpoint = masque.DefaultH2Endpoint
+	MasqueDefaultSNI        = masque.DefaultH2SNI
+	MasqueDefaultEndpoint   = masque.DefaultH2Endpoint
+	MasqueDefaultH3Endpoint = masque.DefaultH3Endpoint
 )
 
 // RunMode selects how tunnels are stacked.
@@ -50,16 +51,20 @@ func RunPsiphon(bindAddress string, proxyAddr string, country string, workingDir
 }
 
 // Run starts the selected tunnel mode.
-func Run(bindAddress string, proxyAddr string, country string, workingDirectory string, config string, mode RunMode, masqueSNI, masqueEndpoint, warpEndpoint string, ctx context.Context) error {
+func Run(bindAddress string, proxyAddr string, country string, workingDirectory string, config string, mode RunMode, masqueSNI, masqueEndpoint, warpEndpoint string, masqueH3, masqueSmart bool, fragment masque.FragmentConfig, ctx context.Context) error {
+	if masqueSmart && mode != ModeMasqueOnly && mode != ModeMasquePsiphon && mode != ModePsiphonMasque {
+		log.Println("-masque-smart applies to MASQUE modes (-mo, -mp, -pm); ignored")
+		masqueSmart = false
+	}
 	switch mode {
 	case ModeWarpOnly:
 		return runWarpOnly(bindAddress, proxyAddr, workingDirectory, warpEndpoint, ctx)
 	case ModeMasqueOnly:
-		return runMasqueOnly(bindAddress, proxyAddr, workingDirectory, masqueSNI, masqueEndpoint, ctx)
+		return runMasqueOnly(bindAddress, proxyAddr, workingDirectory, masqueSNI, masqueEndpoint, masqueH3, masqueSmart, fragment, ctx)
 	case ModeMasquePsiphon:
-		return runMasquePsiphon(bindAddress, proxyAddr, country, workingDirectory, config, masqueSNI, masqueEndpoint, ctx)
+		return runMasquePsiphon(bindAddress, proxyAddr, country, workingDirectory, config, masqueSNI, masqueEndpoint, masqueH3, masqueSmart, fragment, ctx)
 	case ModePsiphonMasque:
-		return runPsiphonMasque(bindAddress, proxyAddr, country, workingDirectory, config, masqueSNI, masqueEndpoint, ctx)
+		return runPsiphonMasque(bindAddress, proxyAddr, country, workingDirectory, config, masqueSNI, masqueEndpoint, masqueH3, masqueSmart, fragment, ctx)
 	case ModePsiphonWarp:
 		return runPsiphonWarp(bindAddress, proxyAddr, country, workingDirectory, config, warpEndpoint, ctx)
 	default:
@@ -77,8 +82,18 @@ func runWarpOnly(bindAddress, proxyAddr, workingDirectory, warpEndpoint string, 
 	return nil
 }
 
-func runMasqueOnly(bindAddress, proxyAddr, workingDirectory, masqueSNI, masqueEndpoint string, ctx context.Context) error {
-	log.Println("Starting Cloudflare MASQUE (HTTP/2) ...")
+func masqueProtoLabel(useH3, smart bool) string {
+	if smart {
+		return "smart"
+	}
+	if useH3 {
+		return "HTTP/3"
+	}
+	return "HTTP/2"
+}
+
+func runMasqueOnly(bindAddress, proxyAddr, workingDirectory, masqueSNI, masqueEndpoint string, masqueH3, masqueSmart bool, fragment masque.FragmentConfig, ctx context.Context) error {
+	log.Printf("Starting Cloudflare MASQUE (%s) ...", masqueProtoLabel(masqueH3, masqueSmart))
 	upstream := ""
 	if proxyAddr != "null" && proxyAddr != "" {
 		host, err := socks5HostPort(proxyAddr)
@@ -86,16 +101,22 @@ func runMasqueOnly(bindAddress, proxyAddr, workingDirectory, masqueSNI, masqueEn
 			return err
 		}
 		upstream = host
-		log.Printf("MASQUE TCP dial via %s", upstream)
+		if masqueSmart {
+			log.Printf("MASQUE dial via %s", upstream)
+		} else if masqueH3 {
+			log.Printf("MASQUE UDP dial via %s", upstream)
+		} else {
+			log.Printf("MASQUE TCP dial via %s", upstream)
+		}
 	}
-	if err := startMasque(bindAddress, workingDirectory, upstream, masqueSNI, masqueEndpoint, ctx); err != nil {
+	if err := startMasque(bindAddress, workingDirectory, upstream, masqueSNI, masqueEndpoint, masqueH3, masqueSmart, fragment, ctx); err != nil {
 		return err
 	}
 	log.Printf("MASQUE SOCKS ready on %s", bindAddress)
 	return nil
 }
 
-func runMasquePsiphon(bindAddress, proxyAddr, country, workingDirectory, config, masqueSNI, masqueEndpoint string, ctx context.Context) error {
+func runMasquePsiphon(bindAddress, proxyAddr, country, workingDirectory, config, masqueSNI, masqueEndpoint string, masqueH3, masqueSmart bool, fragment masque.FragmentConfig, ctx context.Context) error {
 	psiphonBind, err := findFreePort("tcp")
 	if err != nil {
 		return fmt.Errorf("unable to allocate internal Psiphon SOCKS port: %w", err)
@@ -106,21 +127,21 @@ func runMasquePsiphon(bindAddress, proxyAddr, country, workingDirectory, config,
 		return err
 	}
 
-	log.Println("Starting Cloudflare MASQUE (HTTP/2) over Psiphon ...")
-	if err := startMasque(bindAddress, workingDirectory, psiphonBind, masqueSNI, masqueEndpoint, ctx); err != nil {
+	log.Printf("Starting Cloudflare MASQUE (%s) over Psiphon ...", masqueProtoLabel(masqueH3, masqueSmart))
+	if err := startMasque(bindAddress, workingDirectory, psiphonBind, masqueSNI, masqueEndpoint, masqueH3, masqueSmart, fragment, ctx); err != nil {
 		return fmt.Errorf("unable to start masque over psiphon: %w", err)
 	}
 	log.Printf("MASQUE SOCKS ready on %s", bindAddress)
 	return nil
 }
 
-func runPsiphonMasque(bindAddress, proxyAddr, country, workingDirectory, config, masqueSNI, masqueEndpoint string, ctx context.Context) error {
+func runPsiphonMasque(bindAddress, proxyAddr, country, workingDirectory, config, masqueSNI, masqueEndpoint string, masqueH3, masqueSmart bool, fragment masque.FragmentConfig, ctx context.Context) error {
 	masqueBind, err := findFreePort("tcp")
 	if err != nil {
 		return fmt.Errorf("unable to allocate internal MASQUE SOCKS port: %w", err)
 	}
 
-	log.Println("Starting Cloudflare MASQUE (HTTP/2) ...")
+	log.Printf("Starting Cloudflare MASQUE (%s) ...", masqueProtoLabel(masqueH3, masqueSmart))
 	upstream := ""
 	if proxyAddr != "null" && proxyAddr != "" {
 		host, err := socks5HostPort(proxyAddr)
@@ -128,9 +149,15 @@ func runPsiphonMasque(bindAddress, proxyAddr, country, workingDirectory, config,
 			return err
 		}
 		upstream = host
-		log.Printf("MASQUE TCP dial via %s", upstream)
+		if masqueSmart {
+			log.Printf("MASQUE dial via %s", upstream)
+		} else if masqueH3 {
+			log.Printf("MASQUE UDP dial via %s", upstream)
+		} else {
+			log.Printf("MASQUE TCP dial via %s", upstream)
+		}
 	}
-	if err := startMasque(masqueBind, workingDirectory, upstream, masqueSNI, masqueEndpoint, ctx); err != nil {
+	if err := startMasque(masqueBind, workingDirectory, upstream, masqueSNI, masqueEndpoint, masqueH3, masqueSmart, fragment, ctx); err != nil {
 		return err
 	}
 	log.Printf("MASQUE SOCKS ready on %s", masqueBind)
@@ -163,16 +190,39 @@ func runPsiphonWarp(bindAddress, proxyAddr, country, workingDirectory, config, w
 	return nil
 }
 
-func startMasque(bindAddress, workingDirectory, socksUpstream, masqueSNI, masqueEndpoint string, ctx context.Context) error {
+func startMasque(bindAddress, workingDirectory, socksUpstream, masqueSNI, masqueEndpoint string, masqueH3, masqueSmart bool, fragment masque.FragmentConfig, ctx context.Context) error {
 	masqueDir := filepath.Join(workingDirectory, "data", "masque")
 	cfg, err := masque.EnsureIdentity(masqueDir)
 	if err != nil {
 		return err
 	}
+	if masqueSmart {
+		if masqueH3 {
+			log.Println("MASQUE smart selects HTTP/3 or HTTP/2; -masque-h3 is ignored")
+		}
+		if err := cfg.ApplyOverrides("", masqueSNI); err != nil {
+			return err
+		}
+		choice, err := resolveMasqueSmart(ctx, cfg, masqueDir, masqueEndpoint, socksUpstream, fragment)
+		if err != nil {
+			return err
+		}
+		masqueEndpoint = choice.endpoint
+		masqueH3 = choice.useH3
+		fragment = choice.fragment
+	}
 	if err := cfg.ApplyOverrides(masqueEndpoint, masqueSNI); err != nil {
 		return err
 	}
-	return masque.StartSocks(ctx, cfg, bindAddress, socksUpstream)
+	if masqueH3 && fragment.Enabled {
+		log.Println("MASQUE TLS fragment applies to HTTP/2 only; ignored for HTTP/3")
+		fragment.Enabled = false
+	}
+	return masque.StartSocks(ctx, cfg, bindAddress, masque.TunnelOptions{
+		SocksUpstream: socksUpstream,
+		UseH3:         masqueH3,
+		Fragment:      fragment,
+	})
 }
 
 func startWarp(bindAddress, workingDirectory, proxyAddr, warpEndpoint string, ctx context.Context) (string, error) {

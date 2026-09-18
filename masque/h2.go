@@ -51,12 +51,12 @@ func (c *ipConn) WritePacket(b []byte) (icmp []byte, err error) {
 	return nil, nil
 }
 
-func connectH2(ctx context.Context, cfg *Config, socksAddr string) (*ipConn, *http.Response, error) {
+func connectH2(ctx context.Context, cfg *Config, socksAddr string, frag FragmentConfig) (*ipConn, *http.Response, error) {
 	tlsConfig, err := ClientTLSConfig(cfg)
 	if err != nil {
 		return nil, nil, err
 	}
-	return doConnectH2(ctx, tlsConfig, cfg.H2Endpoint(), socksAddr)
+	return doConnectH2(ctx, tlsConfig, cfg.Endpoint(false), socksAddr, frag)
 }
 
 // ClientTLSConfig builds the MASQUE HTTP/2 client certificate + SNI config.
@@ -84,24 +84,31 @@ func ClientTLSConfig(cfg *Config) (*tls.Config, error) {
 	}, nil
 }
 
-// ProbeH2 tries a MASQUE CONNECT-IP handshake against endpoint (host:port).
-// A 2xx status means the IP speaks MASQUE HTTP/2.
-func ProbeH2(ctx context.Context, tlsConfig *tls.Config, endpoint string) (time.Duration, int, error) {
+// ProbeH2 tries a MASQUE CONNECT-IP handshake against endpoint (host:port)
+// and confirms the data plane with DNS probes, matching Aether's verify_h2.
+func ProbeH2(ctx context.Context, cfg *Config, tlsConfig *tls.Config, endpoint, socksAddr string, frag FragmentConfig) (time.Duration, int, error) {
 	start := time.Now()
-	conn, rsp, err := doConnectH2(ctx, tlsConfig, endpoint, "")
-	rtt := time.Since(start)
+	conn, rsp, err := doConnectH2(ctx, tlsConfig, endpoint, socksAddr, frag)
 	status := 0
 	if rsp != nil {
 		status = rsp.StatusCode
 	}
-	if conn != nil {
-		_ = conn.Close()
+	if err != nil {
+		if conn != nil {
+			_ = conn.Close()
+		}
+		return time.Since(start), status, err
 	}
-	return rtt, status, err
+	if err := confirmDataPlane(ctx, conn, tunnelSrcIPv4(cfg)); err != nil {
+		_ = conn.Close()
+		return time.Since(start), status, err
+	}
+	_ = conn.Close()
+	return time.Since(start), status, nil
 }
 
-func doConnectH2(ctx context.Context, tlsConfig *tls.Config, endpoint, socksAddr string) (*ipConn, *http.Response, error) {
-	client, err := newHTTP2Client(tlsConfig, endpoint, socksAddr)
+func doConnectH2(ctx context.Context, tlsConfig *tls.Config, endpoint, socksAddr string, frag FragmentConfig) (*ipConn, *http.Response, error) {
+	client, err := newHTTP2Client(tlsConfig, endpoint, socksAddr, frag)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -143,7 +150,7 @@ func doConnectH2(ctx context.Context, tlsConfig *tls.Config, endpoint, socksAddr
 	return &ipConn{stream: stream}, rsp, nil
 }
 
-func newHTTP2Client(tlsConfig *tls.Config, endpoint, socksAddr string) (*http.Client, error) {
+func newHTTP2Client(tlsConfig *tls.Config, endpoint, socksAddr string, frag FragmentConfig) (*http.Client, error) {
 	parsed, err := url.Parse(connectURI)
 	if err != nil {
 		return nil, err
@@ -157,13 +164,13 @@ func newHTTP2Client(tlsConfig *tls.Config, endpoint, socksAddr string) (*http.Cl
 			if addr == originAuthority || addr == parsed.Host {
 				addr = endpoint
 			}
-			return dialTLSThroughSOCKS(ctx, socksAddr, network, addr, tlsConfig)
+			return dialTLSThroughSOCKS(ctx, socksAddr, network, addr, tlsConfig, frag)
 		},
 	}
 	return &http.Client{Transport: transport}, nil
 }
 
-func dialTLSThroughSOCKS(ctx context.Context, socksAddr, network, addr string, tlsConfig *tls.Config) (net.Conn, error) {
+func dialTLSThroughSOCKS(ctx context.Context, socksAddr, network, addr string, tlsConfig *tls.Config, frag FragmentConfig) (net.Conn, error) {
 	var raw net.Conn
 	var err error
 	if socksAddr == "" {
@@ -183,6 +190,7 @@ func dialTLSThroughSOCKS(ctx context.Context, socksAddr, network, addr string, t
 	if err != nil {
 		return nil, err
 	}
+	raw = wrapFragment(raw, frag)
 	tlsConn := tls.Client(raw, tlsConfig)
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		_ = raw.Close()

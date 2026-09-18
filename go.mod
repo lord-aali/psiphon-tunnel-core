@@ -13,6 +13,8 @@ require (
 	github.com/Psiphon-Labs/psiphon-tunnel-core v2.0.28+incompatible
 	github.com/bepass-org/ipscanner v0.0.0-20240222153143-97adabc6ad92
 	github.com/bepass-org/proxy v0.0.0-20240201095508-c86216dd0aea
+	github.com/flynn/noise v1.1.0
+	github.com/quic-go/quic-go v0.40.1
 	github.com/refraction-networking/conjure v0.9.1
 	github.com/refraction-networking/utls v1.8.2
 	golang.org/x/crypto v0.51.0
@@ -41,7 +43,6 @@ require (
 	github.com/dchest/siphash v1.2.3 // indirect
 	github.com/dgraph-io/badger v1.5.4-0.20180815194500-3a87f6d9c273 // indirect
 	github.com/dgryski/go-farm v0.0.0-20180109070241-2de33835d102 // indirect
-	github.com/flynn/noise v1.1.0 // indirect
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/btree v1.1.2 // indirect
@@ -65,7 +66,6 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/quic-go/qpack v0.4.0 // indirect
 	github.com/quic-go/qtls-go1-20 v0.4.1 // indirect
-	github.com/quic-go/quic-go v0.40.1 // indirect
 	github.com/refraction-networking/ed25519 v0.1.2 // indirect
 	github.com/refraction-networking/gotapdance v1.7.10 // indirect
 	github.com/refraction-networking/obfs4 v0.1.2 // indirect

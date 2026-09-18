@@ -39,7 +39,7 @@
 ### فلگ‌های خط فرمان
 
 ```
-Usage: psiphon [-b addr:port] [-c country] [-p proxy] [-wo|-mo|-mp|-pm|-pw] [-masque-sni sni] [-masque-endpoint ip:port] [-warp-endpoint ip:port] [-scan-masque|-scan-warp] [-list]
+Usage: psiphon [-b addr:port] [-c country] [-p proxy] [-wo|-mo|-mp|-pm|-pw] [-masque-h3] [-masque-smart] [-masque-fragment] [-masque-sni sni] [-masque-endpoint ip:port] [-warp-endpoint ip:port] [-scan-masque|-scan-warp] [-list]
 
   -b string
         آدرس اتصال SOCKS (پیش‌فرض "127.0.0.1:10808")
@@ -56,23 +56,33 @@ Usage: psiphon [-b addr:port] [-c country] [-p proxy] [-wo|-mo|-mp|-pm|-pw] [-ma
   -wo
         فقط Cloudflare WARP (WireGuard)
   -mo
-        فقط Cloudflare MASQUE (HTTP/2)
+        فقط Cloudflare MASQUE
   -mp
-        Cloudflare MASQUE (HTTP/2) روی سایفون
+        Cloudflare MASQUE روی سایفون
   -pm
-        سایفون روی Cloudflare MASQUE (HTTP/2)
+        سایفون روی Cloudflare MASQUE
   -pw
         سایفون روی Cloudflare WARP (WireGuard)
+  -masque-h3
+        استفاده از MASQUE روی HTTP/3 (QUIC) به‌جای HTTP/2 (پیش‌فرض نقطه اتصال 162.159.198.1:443)
+  -masque-smart
+        ترجیح HTTP/3، بازگشت به HTTP/2 (fragment فقط اگر SNI بدون آن فیلتر شود)، و اسکن خودکار نقطه اتصال اگر پیش‌فرض‌ها (و نقطه ذخیره‌شده) در دسترس نباشند
+  -masque-fragment
+        تکه‌تکه کردن TLS ClientHello در MASQUE HTTP/2 (فقط TCP؛ با -masque-h3 نادیده گرفته می‌شود)
+  -masque-fragment-size string
+        بازه اندازه تکه‌ها به بایت (پیش‌فرض "16-32")
+  -masque-fragment-delay string
+        بازه تأخیر تکه‌ها به میلی‌ثانیه (پیش‌فرض "2-10")
   -masque-sni string
         بازنویسی SNI مربوط به MASQUE (پیش‌فرض: consumer-masque.cloudflareclient.com)
   -masque-endpoint string
-        بازنویسی نقطه اتصال MASQUE به صورت host:port (برای IPv6 به شکل [addr]:port؛ پیش‌فرض: 162.159.198.2:443)
+        بازنویسی نقطه اتصال MASQUE به صورت host:port (برای IPv6 به شکل [addr]:port؛ پیش‌فرض H2: 162.159.198.2:443، H3: 162.159.198.1:443)
   -warp-endpoint string
         بازنویسی نقطه اتصال WARP WireGuard به صورت host:port (برای IPv6 به شکل [addr]:port؛ پیش‌فرض: نقطه اتصال پروفایل)
   -scan-masque
-        اسکن بازه‌های IPv4/IPv6 مربوط به MASQUE HTTP/2 برای یافتن نقطه اتصال سالم؛ خروجی در scan-masque.csv
+        اسکن بازه‌های MASQUE به سبک Aether (seed، نمونه CIDR، پورت‌های جایگزین، تأیید data-plane)؛ با -masque-h3 برای HTTP/3؛ خروجی scan-masque.csv
   -scan-warp
-        اسکن بازه‌های IPv4/IPv6 مربوط به WARP WireGuard برای یافتن نقطه اتصال سالم؛ خروجی در scan-warp.csv
+        اسکن بازه‌های WARP WireGuard به سبک Aether (seed، نمونه CIDR، پورت‌های UDP چرخشی، handshake)؛ خروجی scan-warp.csv
 ```
 
 هر دو `-masque-endpoint` و `-warp-endpoint` از IPv4 و IPv6 پشتیبانی می‌کنند. آدرس IPv6 باید داخل براکت باشد: `[2606:4700:102::1]:443`.
@@ -88,7 +98,12 @@ Usage: psiphon [-b addr:port] [-c country] [-p proxy] [-wo|-mo|-mp|-pm|-pw] [-ma
 ./psiphon -pm -c US
 ./psiphon -pw -c US
 ./psiphon -mo -masque-endpoint 162.159.198.2:443 -masque-sni consumer-masque.cloudflareclient.com
+./psiphon -mo -masque-h3
+./psiphon -mo -masque-smart
+./psiphon -mo -masque-h3 -masque-endpoint 162.159.198.1:443
+./psiphon -mo -masque-fragment
 ./psiphon -mo -masque-endpoint "[2606:4700:102::1]:443"
+./psiphon -scan-masque -masque-h3
 ./psiphon -wo -warp-endpoint 162.159.192.1:2408
 ./psiphon -wo -warp-endpoint "[2606:4700:d0::1]:2408"
 ./psiphon -pw -c US -warp-endpoint 162.159.193.1:2408
@@ -99,7 +114,7 @@ Usage: psiphon [-b addr:port] [-c country] [-p proxy] [-wo|-mo|-mp|-pm|-pw] [-ma
 
 فایل‌های هویت:
 - WireGuard WARP: `data/warp/`
-- MASQUE: `data/masque/`
+- MASQUE: `data/masque/` (`config.json` شامل `endpoint_h2_v4`، `protocol` (`h3`/`h2`) و `fragment`)
 
 ## ساختن از سورس
 
